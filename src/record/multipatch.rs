@@ -14,6 +14,9 @@ use record::ConcreteReadableShape;
 use record::{EsriShape, HasShapeType, Point, PointZ, WritableShape};
 use {Error, ShapeType};
 
+#[cfg(feature = "geo-types")]
+use geo_types;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum PatchType {
     TriangleStrip,
@@ -215,5 +218,64 @@ impl EsriShape for Multipatch {
 
     fn m_range(&self) -> [f64; 2] {
         self.m_range
+    }
+}
+
+/// Converts a Multipatch to Multipolygon
+///
+/// For simplicity,reasons, Triangle Fan & Triangle Strip are considered
+/// to be valid polygons
+/// `
+/// When the individual types of rings in a collection of rings representing a polygonal patch with holes
+/// are unknown, the sequence must start with First Ring,
+/// followed by a number of Rings. A sequence of Rings not preceded by an First Ring
+/// is treated as a sequence of Outer Rings without holes.
+/// `
+#[cfg(feature = "geo-types")]
+impl From<Multipatch> for geo_types::MultiPolygon<f64> {
+    fn from(mp: Multipatch) -> Self {
+       let mut polygons = Vec::<geo_types::Polygon<f64>>::new();
+        let mut last_poly = None;
+       for (points, part_type) in mp.parts().zip(&mp.parts_type) {
+           let points = points
+               .iter()
+               .map(|p| geo_types::Point::<f64>::from(*p))
+               .collect::<Vec<geo_types::Point<f64>>>();
+            match part_type {
+                PatchType::TriangleStrip | PatchType::TriangleFan => {
+                    polygons.push(geo_types::Polygon::new(points.into(), vec![]));
+                },
+                PatchType::OuterRing => {
+                    last_poly = Some(geo_types::Polygon::new(points.into(), vec![]));
+                },
+                PatchType::InnerRing => {
+                    if let Some(ref mut polygon) = last_poly {
+                        polygon.interiors_push(points);
+                    } else {
+                        //TODO
+                        // ERROR
+                    }
+                },
+                PatchType::FirstRing => {
+                    if last_poly.is_some() {
+                        polygons.push(last_poly.take().unwrap());
+                    } else {
+                        last_poly = Some(geo_types::Polygon::new(points.into(), vec![]));
+                    }
+                },
+                PatchType::Ring => {
+                    if let Some(ref mut polygon) = last_poly {
+                        polygon.interiors_push(points);
+                    } else {
+                        // treat as sequence of outer ring without hole -> a simple polygon
+                        polygons.push(geo_types::Polygon::new(points.into(), vec![]));
+                    }
+                },
+            }
+       }
+        if last_poly.is_some() {
+            polygons.push(last_poly.take().unwrap());
+        }
+        polygons.into()
     }
 }

@@ -476,6 +476,44 @@ impl<PointType> MultipartShape<PointType> for GenericPolygon<PointType> {
     }
 }
 
+/// Converts a shapefile polygon into a geo_types MultiPolygon
+///
+/// Because in a shapefile `A Polygon may contain multiple outer rings`
+/// which are really just multiple polygons
+///
+/// Vertices of rings defining holes in polygons are in a counterclockwise direction
+#[cfg(feature = "geo-types")]
+impl<PointType> From<GenericPolygon<PointType>> for geo_types::MultiPolygon<f64>
+    where PointType: HasXY + Copy,
+          geo_types::Point<f64>: From<PointType>{
+    fn from(p: GenericPolygon<PointType>) -> Self {
+        use super::is_outer_ring;
+        let mut last_poly = None;
+        let mut polygons = Vec::<geo_types::Polygon<f64>>::new();
+        for points_slc in p.parts() {
+            let points = points_slc
+                .iter()
+                .map(|p| geo_types::Point::<f64>::from(*p))
+                .collect::<Vec<geo_types::Point<f64>>>();
+            if is_outer_ring(points_slc) {
+                let new_poly = geo_types::Polygon::new(points.into(), vec![]);
+                if last_poly.is_some() {
+                    polygons.push(last_poly.replace(new_poly).unwrap());
+                } else {
+                    last_poly = Some(new_poly);
+                }
+            } else {
+                if let Some(ref mut polygon) = last_poly {
+                    polygon.interiors_push(points);
+                } else {
+                    //TODO ERROR
+                }
+            }
+        }
+        polygons.into()
+    }
+}
+
 pub type Polygon = GenericPolygon<Point>;
 
 impl fmt::Display for Polygon {

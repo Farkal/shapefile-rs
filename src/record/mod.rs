@@ -100,6 +100,43 @@ pub(crate) fn is_parts_array_valid<PointType, ST: MultipartShape<PointType>>(sha
         .all(|p| (*p >= 0) & (*p < num_points))
 }
 
+fn exterior_prod<PointType: HasXY>(p1: &PointType, p2: &PointType) -> f64 {
+    (p1.x() * p2.y()) - (p1.y() * p2.x())
+}
+
+
+/// Given the points, check if they represent an outer ring of a polygon
+///
+/// As per ESRI's Shapefile 1998 whitepaper:
+/// `
+/// The order of vertices or orientation for a ring indicates which side of the ring
+/// is the interior of the polygon.
+/// The neighborhood to the right of an observer walking along
+/// the ring in vertex order is the neighborhood inside the polygon.
+/// Vertices of rings defining holes in polygons are in a counterclockwise direction.
+/// Vertices for a single, ringed polygon are, therefore, always in clockwise order.
+/// `
+///
+/// Inner Rings defines holes -> points are in counterclockwise order
+/// Outer Rings's points are un clockwise order
+///
+/// This function uses the [Shoelace formula](https://en.wikipedia.org/wiki/Shoelace_formula)
+/// it only words for simple polygons.
+///
+/// Shoelace formula computes the area:
+///     - if positive, the order is counterclockwise -> its an inner ring
+///     - if negative is an inner ring
+///
+pub(crate) fn is_outer_ring<PointType: HasXY>(points: &[PointType]) -> bool {
+    let area: f64 = points.windows(2).map(|pts| exterior_prod(&pts[0], &pts[1])).sum::<f64>() / 2.0f64;
+    if area < 0.0 {
+        false
+    } else {
+        true
+    }
+}
+
+
 /// enum of Shapes that can be read or written to a shapefile
 pub enum Shape {
     NullShape,
